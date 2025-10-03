@@ -61,7 +61,7 @@
         {
           scheme: location.protocol.replace(":", ""),
           authority: location.host,
-          path: "/extension/dist",
+          path: location.pathname + "extension/dist",
         },
       ],
     });
