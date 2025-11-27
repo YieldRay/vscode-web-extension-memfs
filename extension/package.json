@@ -23,6 +23,11 @@
   "contributes": {
     "commands": [
       {
+        "command": "memfs.workspaceInit",
+        "title": "Setup Workspace",
+        "category": "MemFS"
+      },
+      {
         "command": "memfs.reset",
         "title": "Delete Files",
         "category": "MemFS"
@@ -30,6 +35,11 @@
     ],
     "menus": {
       "commandPalette": [
+        {
+          "command": "memfs.workspaceInit",
+          "title": "Setup Workspace",
+          "category": "MemFS"
+        },
         {
           "command": "memfs.reset",
           "when": "workbenchState == workspace"

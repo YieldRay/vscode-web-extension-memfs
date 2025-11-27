@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
   <head>
     <script>
@@ -10,7 +10,10 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Code" />
-    <link rel="apple-touch-icon" href="https://unpkg.com/code-oss@1.104.3/code-192.png" />
+    <link
+      rel="apple-touch-icon"
+      href="https://unpkg.com/code-oss@1.104.3/code-192.png"
+    />
 
     <!-- Disable pinch zooming -->
     <meta
@@ -19,24 +22,40 @@
     />
 
     <!-- Workbench Icon/Manifest/CSS -->
-    <link rel="icon" href="https://unpkg.com/code-oss@1.104.3/favicon.ico" type="image/x-icon" />
-    <link rel="stylesheet" href="https://unpkg.com/code-oss@1.104.3/out/vs/workbench/workbench.web.main.internal.css" />
+    <link
+      rel="icon"
+      href="https://unpkg.com/code-oss@1.104.3/favicon.ico"
+      type="image/x-icon"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/code-oss@1.104.3/out/vs/workbench/workbench.web.main.internal.css"
+    />
   </head>
 
   <body aria-label=""></body>
 
   <!-- Startup (do not modify order of script tags!) -->
   <script>
-    const baseUrl = new URL("https://unpkg.com/code-oss@1.104.3/out/", window.location.href);
+    const baseUrl = new URL(
+      "https://unpkg.com/code-oss@1.104.3/out/",
+      window.location.href,
+    );
     globalThis._VSCODE_FILE_ROOT = baseUrl.origin + baseUrl.pathname;
   </script>
   <script>
     performance.mark("code/willLoadWorkbenchMain");
   </script>
   <!-- always ensure built in english NLS messages -->
-  <script type="module" src="https://unpkg.com/code-oss@1.104.3/out/nls.messages.js"></script>
+  <script
+    type="module"
+    src="https://unpkg.com/code-oss@1.104.3/out/nls.messages.js"
+  ></script>
   <!-- attempt to load NLS messages in case non-english -->
-  <script type="module" src="https://unpkg.com/code-oss@1.104.3/out/nls.messages.js"></script>
+  <script
+    type="module"
+    src="https://unpkg.com/code-oss@1.104.3/out/nls.messages.js"
+  ></script>
   <script type="module">
     import init from "https://unpkg.com/code-oss@1.104.3/workbench.js";
     init(document.body, {
@@ -44,7 +63,8 @@
         extensionsGallery: {
           serviceUrl: "https://open-vsx.org/vscode/gallery",
           itemUrl: "https://open-vsx.org/vscode/item",
-          resourceUrlTemplate: "https://openvsxorg.blob.core.windows.net/resources/{publisher}/{name}/{version}/{path}",
+          resourceUrlTemplate:
+            "https://openvsxorg.blob.core.windows.net/resources/{publisher}/{name}/{version}/{path}",
         },
         extensionEnabledApiProposals: {},
         /** IMPORTANT CONFIG TO MAKE webWorkerExtensionHostIframe.html work */

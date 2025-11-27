@@ -26,21 +26,32 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.workspace.registerFileSystemProvider("memfs", memFs, {
       isCaseSensitive: true,
-    })
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("memfs.workspaceInit", (_) => {
+      vscode.workspace.updateWorkspaceFolders(0, 0, {
+        uri: vscode.Uri.parse("memfs:/"),
+        name: "MemFS",
+      });
+    }),
   );
   context.subscriptions.push(
     vscode.commands.registerCommand("memfs.reset", async () => {
       for (const dir of await fs.readdir("/")) {
         await fs.rm(dir, { recursive: true, force: true });
       }
-      vscode.window.showInformationMessage("MemFS cleared, please reload the window.");
-    })
+      vscode.window.showInformationMessage(
+        "MemFS cleared, please reload the window.",
+      );
+    }),
   );
 }
 
 class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
   constructor(public readonly scheme: string) {}
-  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> = () => new vscode.Disposable(() => undefined);
+  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> = () =>
+    new vscode.Disposable(() => undefined);
 
   dispose(): void {
     // no-op
@@ -49,13 +60,17 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
   async writeData(
     uri: vscode.Uri,
     contents: string | Uint8Array,
-    options: { create: boolean; overwrite: boolean }
+    options: { create: boolean; overwrite: boolean },
   ): Promise<void> {
-    const buffer = typeof contents === "string" ? Buffer.from(contents) : contents;
+    const buffer =
+      typeof contents === "string" ? Buffer.from(contents) : contents;
     await this.writeFile(uri, buffer, options);
   }
 
-  watch(_uri: vscode.Uri, _options: { recursive: boolean; excludes: string[] }): vscode.Disposable {
+  watch(
+    _uri: vscode.Uri,
+    _options: { recursive: boolean; excludes: string[] },
+  ): vscode.Disposable {
     return new vscode.Disposable(() => undefined);
   }
 
@@ -103,20 +118,25 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
   async writeFile(
     uri: vscode.Uri,
     content: Uint8Array,
-    options: { create: boolean; overwrite: boolean }
+    options: { create: boolean; overwrite: boolean },
   ): Promise<void> {
     const fsPath = this.asFsPath(uri);
     if (!(await fs.exists(fsPath)) && !options.create) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
     try {
-      await fs.writeFile(fsPath, content, { flag: options.overwrite ? "w" : "wx" });
+      await fs.writeFile(fsPath, content, {
+        flag: options.overwrite ? "w" : "wx",
+      });
     } catch (error) {
       throw this.toFileSystemError(error, uri);
     }
   }
 
-  async delete(uri: vscode.Uri, options: { recursive: boolean }): Promise<void> {
+  async delete(
+    uri: vscode.Uri,
+    options: { recursive: boolean },
+  ): Promise<void> {
     const fsPath = this.asFsPath(uri);
     try {
       await fs.rm(fsPath, { force: true, recursive: options.recursive });
@@ -125,7 +145,11 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
     }
   }
 
-  async rename(oldUri: vscode.Uri, newUri: vscode.Uri, options: { overwrite: boolean }): Promise<void> {
+  async rename(
+    oldUri: vscode.Uri,
+    newUri: vscode.Uri,
+    options: { overwrite: boolean },
+  ): Promise<void> {
     const oldPath = this.asFsPath(oldUri);
     const newPath = this.asFsPath(newUri);
 
@@ -139,7 +163,11 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
     }
   }
 
-  async copy(source: vscode.Uri, destination: vscode.Uri, options: { overwrite: boolean }): Promise<void> {
+  async copy(
+    source: vscode.Uri,
+    destination: vscode.Uri,
+    options: { overwrite: boolean },
+  ): Promise<void> {
     const sourcePath = this.asFsPath(source);
     const destPath = this.asFsPath(destination);
 
@@ -156,7 +184,10 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
         await this.copyDirectory(source, destination, options.overwrite);
       } else {
         const data = await fs.readFile(sourcePath);
-        await fs.writeFile(destPath, data instanceof Uint8Array ? data : new Uint8Array(data));
+        await fs.writeFile(
+          destPath,
+          data instanceof Uint8Array ? data : new Uint8Array(data),
+        );
       }
     } catch (error) {
       throw this.toFileSystemError(error, source);
@@ -172,7 +203,11 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
     }
   }
 
-  private async copyDirectory(source: vscode.Uri, destination: vscode.Uri, overwrite: boolean): Promise<void> {
+  private async copyDirectory(
+    source: vscode.Uri,
+    destination: vscode.Uri,
+    overwrite: boolean,
+  ): Promise<void> {
     const sourcePath = this.asFsPath(source);
     const destPath = this.asFsPath(destination);
 
@@ -189,7 +224,10 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
         await this.copyDirectory(childSource, childDestination, overwrite);
       } else {
         const data = await fs.readFile(this.asFsPath(childSource));
-        await fs.writeFile(this.asFsPath(childDestination), data instanceof Uint8Array ? data : new Uint8Array(data));
+        await fs.writeFile(
+          this.asFsPath(childDestination),
+          data instanceof Uint8Array ? data : new Uint8Array(data),
+        );
       }
     }
   }
@@ -201,7 +239,11 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
     }
   }
 
-  private toFileType(stats: { isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }): vscode.FileType {
+  private toFileType(stats: {
+    isFile(): boolean;
+    isDirectory(): boolean;
+    isSymbolicLink(): boolean;
+  }): vscode.FileType {
     if (stats.isFile()) {
       return vscode.FileType.File;
     }
@@ -216,12 +258,17 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
 
   private asFsPath(uri: vscode.Uri): string {
     if (uri.scheme !== this.scheme) {
-      throw vscode.FileSystemError.Unavailable(`Unsupported scheme: ${uri.scheme}`);
+      throw vscode.FileSystemError.Unavailable(
+        `Unsupported scheme: ${uri.scheme}`,
+      );
     }
     return uri.path || "/";
   }
 
-  private toFileSystemError(error: unknown, uri: vscode.Uri): vscode.FileSystemError {
+  private toFileSystemError(
+    error: unknown,
+    uri: vscode.Uri,
+  ): vscode.FileSystemError {
     const err = error as NodeJS.ErrnoException;
     switch (err?.code) {
       case "ENOENT":
@@ -233,7 +280,9 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
       case "ENOTDIR":
         return vscode.FileSystemError.FileNotFound(uri);
       default:
-        return vscode.FileSystemError.Unavailable(err?.message ?? "Unknown error");
+        return vscode.FileSystemError.Unavailable(
+          err?.message ?? "Unknown error",
+        );
     }
   }
 }
