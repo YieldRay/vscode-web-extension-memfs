@@ -41,8 +41,7 @@
       "commandPalette": [
         {
           "command": "memfs.workspaceInit",
-          "title": "Setup Workspace",
-          "category": "MemFS"
+          "when": "workbenchState != workspace"
         },
         {
           "command": "memfs.reset",
