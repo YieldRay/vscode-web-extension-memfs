@@ -9,6 +9,8 @@ import { Buffer } from "buffer";
 import { promises as fs, configureSingle } from "@zenfs/core";
 import { IndexedDB } from "@zenfs/dom";
 
+const textDecoder = new TextDecoder();
+
 async function makeSureRoot() {
   if (!(await fs.exists("/"))) {
     await fs.mkdir("/", { recursive: true });
@@ -26,21 +28,82 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.workspace.registerFileSystemProvider("memfs", memFs, {
       isCaseSensitive: true,
-    })
+    }),
+  );
+  context.subscriptions.push(
+    vscode.workspace.registerFileSearchProvider(
+      "memfs",
+      new MemFSFileSearchProvider(memFs),
+    ),
+  );
+  context.subscriptions.push(
+    vscode.workspace.registerTextSearchProvider(
+      "memfs",
+      new MemFSTextSearchProvider(memFs),
+    ),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("memfs.workspaceInit", (_) => {
+      vscode.workspace.updateWorkspaceFolders(0, 0, {
+        uri: vscode.Uri.parse("memfs:/"),
+        name: "MemFS",
+      });
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("memfs.init", async () => {
+      const uri = vscode.Uri.parse("memfs:/");
+      try {
+        const folders = vscode.workspace.workspaceFolders;
+        if (folders && folders.length >= 0) {
+          const index = folders.length;
+          vscode.workspace.updateWorkspaceFolders(index, 0, {
+            uri,
+            name: "MemFS",
+          });
+        } else {
+          await vscode.commands.executeCommand("vscode.openFolder", uri, false);
+        }
+      } catch (err) {
+        void vscode.window.showErrorMessage(
+          `Failed to open MemFS workspace: ${String(err)}`,
+        );
+      }
+    }),
   );
   context.subscriptions.push(
     vscode.commands.registerCommand("memfs.reset", async () => {
-      for (const dir of await fs.readdir("/")) {
-        await fs.rm(dir, { recursive: true, force: true });
+      const choice = await vscode.window.showWarningMessage(
+        "This will clear the entire MemFS. Are you sure you want to continue?",
+        { modal: true },
+        "Reset",
+      );
+
+      if (choice !== "Reset") {
+        // User cancelled
+        return;
       }
-      vscode.window.showInformationMessage("MemFS cleared, please reload the window.");
-    })
+
+      try {
+        for (const dir of await fs.readdir("/")) {
+          await fs.rm(dir, { recursive: true, force: true });
+        }
+        void vscode.window.showInformationMessage(
+          "MemFS cleared. Please reload the window.",
+        );
+      } catch (err) {
+        void vscode.window.showErrorMessage(
+          `Failed to reset MemFS: ${String(err)}`,
+        );
+      }
+    }),
   );
 }
 
 class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
   constructor(public readonly scheme: string) {}
-  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> = () => new vscode.Disposable(() => undefined);
+  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> = () =>
+    new vscode.Disposable(() => undefined);
 
   dispose(): void {
     // no-op
@@ -49,13 +112,17 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
   async writeData(
     uri: vscode.Uri,
     contents: string | Uint8Array,
-    options: { create: boolean; overwrite: boolean }
+    options: { create: boolean; overwrite: boolean },
   ): Promise<void> {
-    const buffer = typeof contents === "string" ? Buffer.from(contents) : contents;
+    const buffer =
+      typeof contents === "string" ? Buffer.from(contents) : contents;
     await this.writeFile(uri, buffer, options);
   }
 
-  watch(_uri: vscode.Uri, _options: { recursive: boolean; excludes: string[] }): vscode.Disposable {
+  watch(
+    _uri: vscode.Uri,
+    _options: { recursive: boolean; excludes: string[] },
+  ): vscode.Disposable {
     return new vscode.Disposable(() => undefined);
   }
 
@@ -103,20 +170,25 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
   async writeFile(
     uri: vscode.Uri,
     content: Uint8Array,
-    options: { create: boolean; overwrite: boolean }
+    options: { create: boolean; overwrite: boolean },
   ): Promise<void> {
     const fsPath = this.asFsPath(uri);
     if (!(await fs.exists(fsPath)) && !options.create) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
     try {
-      await fs.writeFile(fsPath, content, { flag: options.overwrite ? "w" : "wx" });
+      await fs.writeFile(fsPath, content, {
+        flag: options.overwrite ? "w" : "wx",
+      });
     } catch (error) {
       throw this.toFileSystemError(error, uri);
     }
   }
 
-  async delete(uri: vscode.Uri, options: { recursive: boolean }): Promise<void> {
+  async delete(
+    uri: vscode.Uri,
+    options: { recursive: boolean },
+  ): Promise<void> {
     const fsPath = this.asFsPath(uri);
     try {
       await fs.rm(fsPath, { force: true, recursive: options.recursive });
@@ -125,7 +197,11 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
     }
   }
 
-  async rename(oldUri: vscode.Uri, newUri: vscode.Uri, options: { overwrite: boolean }): Promise<void> {
+  async rename(
+    oldUri: vscode.Uri,
+    newUri: vscode.Uri,
+    options: { overwrite: boolean },
+  ): Promise<void> {
     const oldPath = this.asFsPath(oldUri);
     const newPath = this.asFsPath(newUri);
 
@@ -139,7 +215,11 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
     }
   }
 
-  async copy(source: vscode.Uri, destination: vscode.Uri, options: { overwrite: boolean }): Promise<void> {
+  async copy(
+    source: vscode.Uri,
+    destination: vscode.Uri,
+    options: { overwrite: boolean },
+  ): Promise<void> {
     const sourcePath = this.asFsPath(source);
     const destPath = this.asFsPath(destination);
 
@@ -156,7 +236,10 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
         await this.copyDirectory(source, destination, options.overwrite);
       } else {
         const data = await fs.readFile(sourcePath);
-        await fs.writeFile(destPath, data instanceof Uint8Array ? data : new Uint8Array(data));
+        await fs.writeFile(
+          destPath,
+          data instanceof Uint8Array ? data : new Uint8Array(data),
+        );
       }
     } catch (error) {
       throw this.toFileSystemError(error, source);
@@ -172,7 +255,11 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
     }
   }
 
-  private async copyDirectory(source: vscode.Uri, destination: vscode.Uri, overwrite: boolean): Promise<void> {
+  private async copyDirectory(
+    source: vscode.Uri,
+    destination: vscode.Uri,
+    overwrite: boolean,
+  ): Promise<void> {
     const sourcePath = this.asFsPath(source);
     const destPath = this.asFsPath(destination);
 
@@ -189,7 +276,10 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
         await this.copyDirectory(childSource, childDestination, overwrite);
       } else {
         const data = await fs.readFile(this.asFsPath(childSource));
-        await fs.writeFile(this.asFsPath(childDestination), data instanceof Uint8Array ? data : new Uint8Array(data));
+        await fs.writeFile(
+          this.asFsPath(childDestination),
+          data instanceof Uint8Array ? data : new Uint8Array(data),
+        );
       }
     }
   }
@@ -201,7 +291,11 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
     }
   }
 
-  private toFileType(stats: { isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }): vscode.FileType {
+  private toFileType(stats: {
+    isFile(): boolean;
+    isDirectory(): boolean;
+    isSymbolicLink(): boolean;
+  }): vscode.FileType {
     if (stats.isFile()) {
       return vscode.FileType.File;
     }
@@ -216,12 +310,17 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
 
   private asFsPath(uri: vscode.Uri): string {
     if (uri.scheme !== this.scheme) {
-      throw vscode.FileSystemError.Unavailable(`Unsupported scheme: ${uri.scheme}`);
+      throw vscode.FileSystemError.Unavailable(
+        `Unsupported scheme: ${uri.scheme}`,
+      );
     }
     return uri.path || "/";
   }
 
-  private toFileSystemError(error: unknown, uri: vscode.Uri): vscode.FileSystemError {
+  private toFileSystemError(
+    error: unknown,
+    uri: vscode.Uri,
+  ): vscode.FileSystemError {
     const err = error as NodeJS.ErrnoException;
     switch (err?.code) {
       case "ENOENT":
@@ -233,7 +332,231 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
       case "ENOTDIR":
         return vscode.FileSystemError.FileNotFound(uri);
       default:
-        return vscode.FileSystemError.Unavailable(err?.message ?? "Unknown error");
+        return vscode.FileSystemError.Unavailable(
+          err?.message ?? "Unknown error",
+        );
     }
+  }
+}
+
+class MemFSFileSearchProvider implements vscode.FileSearchProvider {
+  constructor(private memFs: MemFS) {}
+
+  async provideFileSearchResults(
+    query: vscode.FileSearchQuery,
+    options: vscode.FileSearchOptions,
+    token: vscode.CancellationToken,
+  ): Promise<vscode.Uri[]> {
+    const results: vscode.Uri[] = [];
+    const pattern = query.pattern;
+    const patternLower = pattern.toLowerCase();
+
+    const searchInFolder = async (folderPath: string): Promise<void> => {
+      if (token.isCancellationRequested) {
+        return;
+      }
+
+      try {
+        const entries = await fs.readdir(folderPath);
+        for (const entry of entries) {
+          if (token.isCancellationRequested) {
+            return;
+          }
+
+          const entryPath = path.join(folderPath, entry);
+          const stat = await fs.stat(entryPath);
+
+          if (stat.isDirectory()) {
+            if (options.maxResults && results.length >= options.maxResults) {
+              return;
+            }
+            await searchInFolder(entryPath);
+          } else if (stat.isFile()) {
+            // File search uses case-insensitive matching by default (consistent with VS Code behavior)
+            if (entry.toLowerCase().includes(patternLower)) {
+              results.push(
+                vscode.Uri.parse(`${this.memFs.scheme}:${entryPath}`),
+              );
+              if (options.maxResults && results.length >= options.maxResults) {
+                return;
+              }
+            }
+          }
+        }
+      } catch {
+        // Ignore errors for inaccessible directories
+      }
+    };
+
+    for (const folder of options.includes || []) {
+      if (token.isCancellationRequested) {
+        break;
+      }
+      const folderPath = folder.path || "/";
+      await searchInFolder(folderPath);
+    }
+
+    // If no includes specified, search from root
+    if (!options.includes || options.includes.length === 0) {
+      await searchInFolder("/");
+    }
+
+    return results;
+  }
+}
+
+class MemFSTextSearchProvider implements vscode.TextSearchProvider {
+  constructor(private memFs: MemFS) {}
+
+  async provideTextSearchResults(
+    query: vscode.TextSearchQuery,
+    options: vscode.TextSearchOptions,
+    progress: vscode.Progress<vscode.TextSearchResult>,
+    token: vscode.CancellationToken,
+  ): Promise<vscode.TextSearchComplete> {
+    let limitHit = false;
+    let resultCount = 0;
+
+    const searchPattern = query.isRegExp
+      ? new RegExp(query.pattern, query.isCaseSensitive ? "g" : "gi")
+      : null;
+    const searchString = query.isCaseSensitive
+      ? query.pattern
+      : query.pattern.toLowerCase();
+
+    const searchInFile = async (filePath: string): Promise<void> => {
+      if (token.isCancellationRequested || limitHit) {
+        return;
+      }
+
+      try {
+        const content = await fs.readFile(filePath);
+        const text = textDecoder.decode(content);
+        const lines = text.split(/\r?\n/);
+        const fileUri = vscode.Uri.parse(`${this.memFs.scheme}:${filePath}`);
+
+        for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+          if (token.isCancellationRequested || limitHit) {
+            return;
+          }
+
+          const line = lines[lineNumber];
+          const searchLine = query.isCaseSensitive ? line : line.toLowerCase();
+
+          if (searchPattern) {
+            // Regex search
+            searchPattern.lastIndex = 0;
+            let match: RegExpExecArray | null;
+            while (
+              (match = searchPattern.exec(line)) !== null &&
+              !limitHit &&
+              !token.isCancellationRequested
+            ) {
+              progress.report({
+                uri: fileUri,
+                ranges: new vscode.Range(
+                  lineNumber,
+                  match.index,
+                  lineNumber,
+                  match.index + match[0].length,
+                ),
+                preview: {
+                  text: line,
+                  matches: new vscode.Range(
+                    0,
+                    match.index,
+                    0,
+                    match.index + match[0].length,
+                  ),
+                },
+              });
+              resultCount++;
+              if (options.maxResults && resultCount >= options.maxResults) {
+                limitHit = true;
+                return;
+              }
+            }
+          } else {
+            // Plain text search
+            let startIndex = 0;
+            let matchIndex: number;
+            while (
+              (matchIndex = searchLine.indexOf(searchString, startIndex)) !==
+                -1 &&
+              !limitHit &&
+              !token.isCancellationRequested
+            ) {
+              progress.report({
+                uri: fileUri,
+                ranges: new vscode.Range(
+                  lineNumber,
+                  matchIndex,
+                  lineNumber,
+                  matchIndex + searchString.length,
+                ),
+                preview: {
+                  text: line,
+                  matches: new vscode.Range(
+                    0,
+                    matchIndex,
+                    0,
+                    matchIndex + searchString.length,
+                  ),
+                },
+              });
+              resultCount++;
+              if (options.maxResults && resultCount >= options.maxResults) {
+                limitHit = true;
+                return;
+              }
+              startIndex = matchIndex + 1;
+            }
+          }
+        }
+      } catch {
+        // Ignore errors for unreadable files (e.g., binary files)
+      }
+    };
+
+    const searchInFolder = async (folderPath: string): Promise<void> => {
+      if (token.isCancellationRequested || limitHit) {
+        return;
+      }
+
+      try {
+        const entries = await fs.readdir(folderPath);
+        for (const entry of entries) {
+          if (token.isCancellationRequested || limitHit) {
+            return;
+          }
+
+          const entryPath = path.join(folderPath, entry);
+          const stat = await fs.stat(entryPath);
+
+          if (stat.isDirectory()) {
+            await searchInFolder(entryPath);
+          } else if (stat.isFile()) {
+            await searchInFile(entryPath);
+          }
+        }
+      } catch {
+        // Ignore errors for inaccessible directories
+      }
+    };
+
+    for (const folder of options.includes || []) {
+      if (token.isCancellationRequested || limitHit) {
+        break;
+      }
+      const folderPath = folder.path || "/";
+      await searchInFolder(folderPath);
+    }
+
+    // If no includes specified, search from root
+    if (!options.includes || options.includes.length === 0) {
+      await searchInFolder("/");
+    }
+
+    return { limitHit };
   }
 }

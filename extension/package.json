@@ -1,7 +1,7 @@
 {
   "name": "vscode-web-extension-memfs",
-  "displayName": "MemFS - a file system provider sample",
-  "description": "MemFs - description",
+  "displayName": "MemFS - Filesystem provider",
+  "description": "Filesystem provider based on IndexedDB",
   "version": "0.0.1",
   "publisher": "YieldRay",
   "private": true,
@@ -15,6 +15,10 @@
   "categories": [
     "Other"
   ],
+  "enabledApiProposals": [
+    "fileSearchProvider",
+    "textSearchProvider"
+  ],
   "activationEvents": [
     "onFileSystem:memfs"
   ],
@@ -22,6 +26,11 @@
   "browser": "./extension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "memfs.init",
+        "title": "Setup",
+        "category": "MemFS"
+      },
       {
         "command": "memfs.reset",
         "title": "Delete Files",
@@ -31,8 +40,10 @@
     "menus": {
       "commandPalette": [
         {
-          "command": "memfs.reset",
-          "when": "workbenchState == workspace"
+          "command": "memfs.init"
+        },
+        {
+          "command": "memfs.reset"
         }
       ]
     }
@@ -53,11 +64,12 @@
     "process": "^0.11.10"
   },
   "devDependencies": {
-    "esbuild-register": "^3.6.0",
-    "webpack": "^5.102.0",
-    "webpack-cli": "^6.0.1",
     "@types/node": "^22.18.8",
     "@types/vscode": "^1.104.0",
-    "esbuild-loader": "^4.3.0"
+    "esbuild-loader": "^4.3.0",
+    "esbuild-register": "^3.6.0",
+    "prettier": "^3.7.1",
+    "webpack": "^5.102.0",
+    "webpack-cli": "^6.0.1"
   }
 }
