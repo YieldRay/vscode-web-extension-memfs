@@ -1,7 +1,7 @@
 {
   "name": "vscode-web-extension-memfs",
-  "displayName": "MemFS - a file system provider sample",
-  "description": "MemFs - description",
+  "displayName": "MemFS - Filesystem provider",
+  "description": "Filesystem provider based on IndexedDB",
   "version": "0.0.1",
   "publisher": "YieldRay",
   "private": true,
