@@ -2,8 +2,12 @@
   "name": "root",
   "private": true,
   "scripts": {
-    "dev": "mprocs \"pnpm run --filter=./extension watch-web\" serve",
+    "dev": "mprocs serve \"pnpm run --filter=./extension watch-web\"",
     "build": "pnpm run --filter=./extension compile-web"
   },
-  "packageManager": "pnpm@10.18.0"
+  "packageManager": "pnpm@10.27.0",
+  "devDependencies": {
+    "mprocs": "^0.8.2",
+    "serve": "^14.2.5"
+  }
 }

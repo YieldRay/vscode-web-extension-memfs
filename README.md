@@ -8,3 +8,18 @@ This extension is intended to serve as an example for building your own VSCode w
 - <https://github.com/formulahendry/vscode-code-runner-for-web>
 
 [`code-oss`](https://npm.im/code-oss) is an npm package that provides the latest VSCode web build. Check out [index.html](./index.html) to see how to use it.
+
+## Development
+
+```sh
+pnpm install
+pnpm run dev
+```
+
+## Build
+
+```sh
+pnpm run build
+```
+
+The built extension will be output to the `extension/dist` folder.
