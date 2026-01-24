@@ -5,9 +5,9 @@
     "dev": "mprocs serve \"pnpm run --filter=./extension watch-web\"",
     "build": "pnpm run --filter=./extension compile-web"
   },
-  "packageManager": "pnpm@10.27.0",
+  "packageManager": "pnpm@10.28.1",
   "devDependencies": {
-    "mprocs": "^0.8.2",
+    "mprocs": "^0.8.3",
     "serve": "^14.2.5"
   }
 }
