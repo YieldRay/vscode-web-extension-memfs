@@ -8,6 +8,8 @@ import { posix as path } from "path";
 import { Buffer } from "buffer";
 import { promises as fs, configureSingle } from "@zenfs/core";
 import { IndexedDB } from "@zenfs/dom";
+import { ZenFsAdapter, type FsChangeEvent } from "./zenfs-adapter";
+import { BashTerminal } from "./terminal";
 
 async function makeSureRoot() {
   if (!(await fs.exists("/"))) {
@@ -36,14 +38,84 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.window.showInformationMessage("MemFS cleared, please reload the window.");
     })
   );
+
+  // Terminal
+  const workspaceAuthority = vscode.workspace.workspaceFolders?.[0]?.uri.authority ?? "";
+
+  function toChangeType(t: FsChangeEvent["type"]): vscode.FileChangeType {
+    switch (t) {
+      case "created": return vscode.FileChangeType.Created;
+      case "deleted": return vscode.FileChangeType.Deleted;
+      default: return vscode.FileChangeType.Changed;
+    }
+  }
+
+  function createBashTerminal() {
+    const adapter = new ZenFsAdapter();
+    const pty = new BashTerminal(adapter, (changes) => {
+      const events: vscode.FileChangeEvent[] = changes.map((c) => ({
+        type: toChangeType(c.type),
+        uri: vscode.Uri.from({ scheme: "memfs", authority: workspaceAuthority, path: c.path }),
+      }));
+      memFs.fireChanges(events);
+    });
+    return vscode.window.createTerminal({ name: "just-bash", pty });
+  }
+
+  // Register a command to create new terminals
+  context.subscriptions.push(
+    vscode.commands.registerCommand("memfs.newTerminal", () => {
+      createBashTerminal().show();
+    })
+  );
+
+  // Register terminal profile so the "+" dropdown in the terminal panel works
+  context.subscriptions.push(
+    vscode.window.registerTerminalProfileProvider("memfs.bash", {
+      provideTerminalProfile(): vscode.TerminalProfile {
+        return new vscode.TerminalProfile({
+          name: "just-bash",
+          pty: (() => {
+            const adapter = new ZenFsAdapter();
+            return new BashTerminal(adapter, (changes) => {
+              const events: vscode.FileChangeEvent[] = changes.map((c) => ({
+                type: toChangeType(c.type),
+                uri: vscode.Uri.from({ scheme: "memfs", authority: workspaceAuthority, path: c.path }),
+              }));
+              memFs.fireChanges(events);
+            });
+          })(),
+        });
+      },
+    })
+  );
+
+  // Auto-open the first terminal
+  try {
+    createBashTerminal().show();
+  } catch (err) {
+    console.error("[MemFS] Failed to create terminal:", err);
+  }
 }
 
 class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
+  private _changeEmitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
+  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> = this._changeEmitter.event;
+
   constructor(public readonly scheme: string) {}
-  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> = () => new vscode.Disposable(() => undefined);
+
+  /**
+   * Notify the explorer that files have changed.
+   * Called by the terminal after each command execution.
+   */
+  fireChanges(events: vscode.FileChangeEvent[]): void {
+    if (events.length > 0) {
+      this._changeEmitter.fire(events);
+    }
+  }
 
   dispose(): void {
-    // no-op
+    this._changeEmitter.dispose();
   }
 
   async writeData(
