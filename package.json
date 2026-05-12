@@ -9,5 +9,8 @@
   "devDependencies": {
     "mprocs": "^0.8.3",
     "serve": "^14.2.6"
+  },
+  "dependencies": {
+    "almostnode": "^0.2.14"
   }
 }

@@ -35,8 +35,6 @@ const webExtensionConfig: webpack.Configuration = {
     alias: {},
     fallback: {
       // Webpack 5 no longer polyfills Node.js core modules automatically.
-      // see https://webpack.js.org/configuration/resolve/#resolvefallback
-      // for the list of Node.js core module polyfills.
       path: require.resolve("path-browserify"),
       buffer: require.resolve("buffer"),
       process: require.resolve("process/browser"),
@@ -53,24 +51,12 @@ const webExtensionConfig: webpack.Configuration = {
           },
         ],
       },
-      {
-        // ESM modules in node_modules (just-bash, minimatch) use bare specifiers
-        // like 'process/browser' without extensions. Disable fullySpecified for them.
-        test: /\.m?js$/,
-        resolve: {
-          fullySpecified: false,
-        },
-      },
     ],
   },
   plugins: [
     new webpack.ProvidePlugin({
       process: "process/browser", // provide a shim for the global `process` variable
       Buffer: ["buffer", "Buffer"], // provide a shim for the global `Buffer` variable
-    }),
-    // Stub node:* imports that just-bash's browser bundle references.
-    new webpack.NormalModuleReplacementPlugin(/^node:/, (resource) => {
-      resource.request = path.resolve(__dirname, "src", "empty-module.ts");
     }),
     new CopyFilesPlugin(["package.json", "package.nls.json"]),
     new EsbuildPlugin({

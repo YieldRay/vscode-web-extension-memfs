@@ -1,33 +1,41 @@
 import * as vscode from "vscode";
-import { Bash } from "just-bash";
-import type { ZenFsAdapter, FsChangeEvent } from "./zenfs-adapter";
+import { createHostFunction } from "./host-bridge";
+
+/** Result from almostnode's container.run() */
+interface RunResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
 
 const MAX_HISTORY = 100;
-const PROMPT = "bash$ ";
+const PROMPT = "$ ";
 
-/** Callback to notify the file explorer of changes after a command runs. */
-export type OnFsChange = (changes: FsChangeEvent[]) => void;
+/** Callback invoked after each command to notify the file explorer of changes. */
+export type OnCommandDone = () => void;
+
+const runCommand = createHostFunction((cmd: string) => {
+  return globalThis.container.run(cmd);
+});
 
 /**
- * VS Code Pseudoterminal backed by just-bash.
+ * VS Code Pseudoterminal backed by almostnode's container.run().
  *
  * Full line editor with cursor movement, word operations, and history.
+ * Command execution happens on the main page via the commands bridge.
  */
-export class BashTerminal implements vscode.Pseudoterminal {
+export class AlmostNodeTerminal implements vscode.Pseudoterminal {
   private _writeEmitter = new vscode.EventEmitter<string>();
   readonly onDidWrite: vscode.Event<string> = this._writeEmitter.event;
 
   private _closeEmitter = new vscode.EventEmitter<void | number>();
   readonly onDidClose: vscode.Event<void | number> = this._closeEmitter.event;
 
-  private _bash: Bash;
-  private _adapter: ZenFsAdapter;
-  private _onFsChange?: OnFsChange;
+  private _onCommandDone?: OnCommandDone;
 
   // Line editing state
   private _line = "";
   private _cursor = 0;
-  private _cwd = "/";
   private _running = false;
 
   // Command history
@@ -35,15 +43,13 @@ export class BashTerminal implements vscode.Pseudoterminal {
   private _historyIndex = -1;
   private _savedLine = "";
 
-  constructor(adapter: ZenFsAdapter, onFsChange?: OnFsChange) {
-    this._adapter = adapter;
-    this._bash = new Bash({ fs: adapter, cwd: "/" });
-    this._onFsChange = onFsChange;
+  constructor(onCommandDone?: OnCommandDone) {
+    this._onCommandDone = onCommandDone;
   }
 
   open(_initialDimensions: vscode.TerminalDimensions | undefined): void {
-    console.log("[BashTerminal] open() called");
-    this._writeEmitter.fire("MemFS Bash Terminal (powered by just-bash)\r\n");
+    console.log("[AlmostNodeTerminal] open() called");
+    this._writeEmitter.fire("MemFS Terminal (powered by almostnode)\r\n");
     this._writeEmitter.fire(PROMPT);
   }
 
@@ -408,7 +414,7 @@ export class BashTerminal implements vscode.Pseudoterminal {
 
     this._running = true;
     try {
-      const result = await this._bash.exec(trimmed, { cwd: this._cwd });
+      const result: RunResult = await runCommand(trimmed);
 
       if (result.stdout) {
         this._writeEmitter.fire(result.stdout.replace(/\n/g, "\r\n"));
@@ -422,18 +428,14 @@ export class BashTerminal implements vscode.Pseudoterminal {
           this._writeEmitter.fire("\r\n");
         }
       }
-
-      if (result.env?.PWD) {
-        this._cwd = result.env.PWD;
-      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this._writeEmitter.fire(`Error: ${msg}\r\n`);
     }
 
-    const changes = this._adapter.flushChanges();
-    if (changes.length > 0 && this._onFsChange) {
-      this._onFsChange(changes);
+    // Notify file explorer of potential changes
+    if (this._onCommandDone) {
+      this._onCommandDone();
     }
 
     this._running = false;

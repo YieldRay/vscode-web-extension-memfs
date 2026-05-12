@@ -1,102 +1,254 @@
 /**
  * https://code.visualstudio.com/api/extension-guides/web-extensions
  * https://code.visualstudio.com/api/extension-guides/virtual-workspaces
+ *
+ * This extension uses `almostnode` (loaded on the main page via index.html)
+ * for both the virtual filesystem and terminal command execution.
+ * Communication with the main page happens through the `host.eval` / `host.promise`
+ * commands bridge, since the extension host runs in a cross-origin web worker.
  */
 
 import * as vscode from "vscode";
-import { posix as path } from "path";
-import { Buffer } from "buffer";
-import { promises as fs, configureSingle } from "@zenfs/core";
-import { IndexedDB } from "@zenfs/dom";
-import { ZenFsAdapter, type FsChangeEvent } from "./zenfs-adapter";
-import { BashTerminal } from "./terminal";
+import { runOnHost, createHostFunction } from "./host-bridge";
+import { AlmostNodeTerminal } from "./terminal";
 
-async function makeSureRoot() {
-  if (!(await fs.exists("/"))) {
-    await fs.mkdir("/", { recursive: true });
+// --- Host functions (reusable, executed on main page) ---
+
+const initContainer = createHostFunction(() => {
+  if (!globalThis.container) {
+    globalThis.container = globalThis.almostnode.createContainer({ cwd: "/" });
   }
-}
+  return "ok";
+});
+
+const vfsStat = createHostFunction((fsPath: string) => {
+  const s = globalThis.container.vfs.statSync(fsPath);
+  return {
+    isFile: s.isFile(),
+    isDirectory: s.isDirectory(),
+    ctimeMs: s.ctimeMs,
+    mtimeMs: s.mtimeMs,
+    size: s.size,
+  };
+});
+
+const vfsReadDir = createHostFunction((fsPath: string) => {
+  const vfs = globalThis.container.vfs;
+  const entries = vfs.readdirSync(fsPath);
+  return entries.map((name: string) => {
+    const childPath = fsPath === "/" ? "/" + name : fsPath + "/" + name;
+    const stat = vfs.statSync(childPath);
+    return { name, isFile: stat.isFile(), isDirectory: stat.isDirectory() };
+  });
+});
+
+const vfsReadFile = createHostFunction((fsPath: string) => {
+  const vfs = globalThis.container.vfs;
+  const data = vfs.readFileSync(fsPath);
+  // Encode as base64 for safe binary transfer across the bridge
+  let binary = "";
+  for (let i = 0; i < data.length; i++) {
+    binary += String.fromCharCode(data[i]);
+  }
+  return btoa(binary);
+});
+
+const vfsWriteFile = createHostFunction((fsPath: string, base64: string, create: boolean, overwrite: boolean) => {
+  const vfs = globalThis.container.vfs;
+  const exists = vfs.existsSync(fsPath);
+  if (!exists && !create) {
+    const err: any = new Error("ENOENT: no such file or directory");
+    err.code = "ENOENT";
+    throw err;
+  }
+  if (exists && !overwrite) {
+    const err: any = new Error("EEXIST: file already exists");
+    err.code = "EEXIST";
+    throw err;
+  }
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  vfs.writeFileSync(fsPath, bytes);
+  return "ok";
+});
+
+const vfsDelete = createHostFunction((fsPath: string, recursive: boolean) => {
+  const vfs = globalThis.container.vfs;
+  const stat = vfs.statSync(fsPath);
+  if (stat.isDirectory()) {
+    if (recursive) {
+      function rmrf(p: string) {
+        const entries = vfs.readdirSync(p);
+        for (const e of entries) {
+          const child = p === "/" ? "/" + e : p + "/" + e;
+          const s = vfs.statSync(child);
+          if (s.isDirectory()) rmrf(child);
+          else vfs.unlinkSync(child);
+        }
+        if (p !== "/") vfs.rmdirSync(p);
+      }
+      rmrf(fsPath);
+    } else {
+      vfs.rmdirSync(fsPath);
+    }
+  } else {
+    vfs.unlinkSync(fsPath);
+  }
+  return "ok";
+});
+
+const vfsRename = createHostFunction((oldPath: string, newPath: string, overwrite: boolean) => {
+  const vfs = globalThis.container.vfs;
+  if (overwrite && vfs.existsSync(newPath)) {
+    const stat = vfs.statSync(newPath);
+    if (stat.isDirectory()) {
+      function rmrf(p: string) {
+        const entries = vfs.readdirSync(p);
+        for (const e of entries) {
+          const child = p === "/" ? "/" + e : p + "/" + e;
+          const s = vfs.statSync(child);
+          if (s.isDirectory()) rmrf(child);
+          else vfs.unlinkSync(child);
+        }
+        if (p !== "/") vfs.rmdirSync(p);
+      }
+      rmrf(newPath);
+    } else {
+      vfs.unlinkSync(newPath);
+    }
+  }
+  vfs.renameSync(oldPath, newPath);
+  return "ok";
+});
+
+const vfsCopy = createHostFunction((sourcePath: string, destPath: string, overwrite: boolean) => {
+  const vfs = globalThis.container.vfs;
+  if (!vfs.existsSync(sourcePath)) {
+    const err: any = new Error("ENOENT");
+    err.code = "ENOENT";
+    throw err;
+  }
+  if (vfs.existsSync(destPath) && !overwrite) {
+    const err: any = new Error("EEXIST");
+    err.code = "EEXIST";
+    throw err;
+  }
+  const stat = vfs.statSync(sourcePath);
+  if (stat.isDirectory()) {
+    function copyDir(src: string, dest: string) {
+      vfs.mkdirSync(dest, { recursive: true });
+      const entries = vfs.readdirSync(src);
+      for (const e of entries) {
+        const childSrc = src === "/" ? "/" + e : src + "/" + e;
+        const childDest = dest === "/" ? "/" + e : dest + "/" + e;
+        const s = vfs.statSync(childSrc);
+        if (s.isDirectory()) copyDir(childSrc, childDest);
+        else vfs.copyFileSync(childSrc, childDest);
+      }
+    }
+    copyDir(sourcePath, destPath);
+  } else {
+    vfs.copyFileSync(sourcePath, destPath);
+  }
+  return "ok";
+});
+
+const vfsMkdir = createHostFunction((fsPath: string) => {
+  globalThis.container.vfs.mkdirSync(fsPath, { recursive: true });
+  return "ok";
+});
+
+const vfsReset = createHostFunction(() => {
+  const vfs = globalThis.container.vfs;
+  const entries = vfs.readdirSync("/");
+  function rmrf(p: string) {
+    const children = vfs.readdirSync(p);
+    for (const e of children) {
+      const child = p === "/" ? "/" + e : p + "/" + e;
+      const s = vfs.statSync(child);
+      if (s.isDirectory()) rmrf(child);
+      else vfs.unlinkSync(child);
+    }
+    if (p !== "/") vfs.rmdirSync(p);
+  }
+  for (const entry of entries) {
+    const path = "/" + entry;
+    const stat = vfs.statSync(path);
+    if (stat.isDirectory()) rmrf(path);
+    else vfs.unlinkSync(path);
+  }
+  return "ok";
+});
+
+// --- Extension activation ---
 
 export async function activate(context: vscode.ExtensionContext) {
-  await configureSingle({ backend: IndexedDB });
-  await makeSureRoot();
+  await initContainer();
 
-  console.log("Hello, MemFS!");
+  console.log("Hello, MemFS! (powered by almostnode)");
+  console.log("User agent:", await runOnHost(() => navigator.userAgent));
 
   const memFs = new MemFS("memfs");
   context.subscriptions.push(memFs);
   context.subscriptions.push(
-    vscode.workspace.registerFileSystemProvider("memfs", memFs, {
-      isCaseSensitive: true,
-    })
+    vscode.workspace.registerFileSystemProvider("memfs", memFs, { isCaseSensitive: true }),
   );
   context.subscriptions.push(
     vscode.commands.registerCommand("memfs.reset", async () => {
-      for (const dir of await fs.readdir("/")) {
-        await fs.rm(dir, { recursive: true, force: true });
-      }
+      await vfsReset();
+      memFs.fireChanges([
+        { type: vscode.FileChangeType.Changed, uri: vscode.Uri.from({ scheme: "memfs", path: "/" }) },
+      ]);
       vscode.window.showInformationMessage("MemFS cleared, please reload the window.");
-    })
+    }),
   );
 
   // Terminal
   const workspaceAuthority = vscode.workspace.workspaceFolders?.[0]?.uri.authority ?? "";
 
-  function toChangeType(t: FsChangeEvent["type"]): vscode.FileChangeType {
-    switch (t) {
-      case "created": return vscode.FileChangeType.Created;
-      case "deleted": return vscode.FileChangeType.Deleted;
-      default: return vscode.FileChangeType.Changed;
-    }
+  function notifyFsChanged() {
+    memFs.fireChanges([
+      {
+        type: vscode.FileChangeType.Changed,
+        uri: vscode.Uri.from({ scheme: "memfs", authority: workspaceAuthority, path: "/" }),
+      },
+    ]);
   }
 
-  function createBashTerminal() {
-    const adapter = new ZenFsAdapter();
-    const pty = new BashTerminal(adapter, (changes) => {
-      const events: vscode.FileChangeEvent[] = changes.map((c) => ({
-        type: toChangeType(c.type),
-        uri: vscode.Uri.from({ scheme: "memfs", authority: workspaceAuthority, path: c.path }),
-      }));
-      memFs.fireChanges(events);
-    });
-    return vscode.window.createTerminal({ name: "just-bash", pty });
+  function createTerminal() {
+    const pty = new AlmostNodeTerminal(notifyFsChanged);
+    return vscode.window.createTerminal({ name: "bash", pty });
   }
 
-  // Register a command to create new terminals
   context.subscriptions.push(
     vscode.commands.registerCommand("memfs.newTerminal", () => {
-      createBashTerminal().show();
-    })
+      createTerminal().show();
+    }),
   );
 
-  // Register terminal profile so the "+" dropdown in the terminal panel works
   context.subscriptions.push(
     vscode.window.registerTerminalProfileProvider("memfs.bash", {
       provideTerminalProfile(): vscode.TerminalProfile {
         return new vscode.TerminalProfile({
-          name: "just-bash",
-          pty: (() => {
-            const adapter = new ZenFsAdapter();
-            return new BashTerminal(adapter, (changes) => {
-              const events: vscode.FileChangeEvent[] = changes.map((c) => ({
-                type: toChangeType(c.type),
-                uri: vscode.Uri.from({ scheme: "memfs", authority: workspaceAuthority, path: c.path }),
-              }));
-              memFs.fireChanges(events);
-            });
-          })(),
+          name: "bash",
+          pty: new AlmostNodeTerminal(notifyFsChanged),
         });
       },
-    })
+    }),
   );
 
   // Auto-open the first terminal
   try {
-    createBashTerminal().show();
+    createTerminal().show();
   } catch (err) {
     console.error("[MemFS] Failed to create terminal:", err);
   }
 }
+
+// --- FileSystemProvider ---
 
 class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
   private _changeEmitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
@@ -104,10 +256,6 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
 
   constructor(public readonly scheme: string) {}
 
-  /**
-   * Notify the explorer that files have changed.
-   * Called by the terminal after each command execution.
-   */
   fireChanges(events: vscode.FileChangeEvent[]): void {
     if (events.length > 0) {
       this._changeEmitter.fire(events);
@@ -118,15 +266,6 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
     this._changeEmitter.dispose();
   }
 
-  async writeData(
-    uri: vscode.Uri,
-    contents: string | Uint8Array,
-    options: { create: boolean; overwrite: boolean }
-  ): Promise<void> {
-    const buffer = typeof contents === "string" ? Buffer.from(contents) : contents;
-    await this.writeFile(uri, buffer, options);
-  }
-
   watch(_uri: vscode.Uri, _options: { recursive: boolean; excludes: string[] }): vscode.Disposable {
     return new vscode.Disposable(() => undefined);
   }
@@ -134,14 +273,18 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
   async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
     const fsPath = this.asFsPath(uri);
     try {
-      const stats = await fs.stat(fsPath);
+      const stats = await vfsStat(fsPath);
       return {
-        type: this.toFileType(stats),
-        ctime: stats.ctime.getTime(),
-        mtime: stats.mtime.getTime(),
-        size: stats.size,
+        type: stats.isFile
+          ? vscode.FileType.File
+          : stats.isDirectory
+            ? vscode.FileType.Directory
+            : vscode.FileType.Unknown,
+        ctime: stats.ctimeMs ?? 0,
+        mtime: stats.mtimeMs ?? 0,
+        size: stats.size ?? 0,
       };
-    } catch (error) {
+    } catch (error: any) {
       throw this.toFileSystemError(error, uri);
     }
   }
@@ -149,15 +292,12 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
   async readDirectory(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
     const fsPath = this.asFsPath(uri);
     try {
-      const entries = await fs.readdir(fsPath);
-      const result: [string, vscode.FileType][] = [];
-      for (const name of entries) {
-        const childUri = vscode.Uri.joinPath(uri, name);
-        const stat = await fs.stat(this.asFsPath(childUri));
-        result.push([name, this.toFileType(stat)]);
-      }
-      return result;
-    } catch (error) {
+      const entries = await vfsReadDir(fsPath);
+      return entries.map((e: any) => [
+        e.name,
+        e.isFile ? vscode.FileType.File : e.isDirectory ? vscode.FileType.Directory : vscode.FileType.Unknown,
+      ]);
+    } catch (error: any) {
       throw this.toFileSystemError(error, uri);
     }
   }
@@ -165,25 +305,28 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
   async readFile(uri: vscode.Uri): Promise<Uint8Array> {
     const fsPath = this.asFsPath(uri);
     try {
-      const data = await fs.readFile(fsPath);
-      return data instanceof Uint8Array ? data : new Uint8Array(data);
-    } catch (error) {
+      const base64 = await vfsReadFile(fsPath);
+      const binaryStr = atob(base64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      return bytes;
+    } catch (error: any) {
       throw this.toFileSystemError(error, uri);
     }
   }
 
-  async writeFile(
-    uri: vscode.Uri,
-    content: Uint8Array,
-    options: { create: boolean; overwrite: boolean }
-  ): Promise<void> {
+  async writeFile(uri: vscode.Uri, content: Uint8Array, options: { create: boolean; overwrite: boolean }): Promise<void> {
     const fsPath = this.asFsPath(uri);
-    if (!(await fs.exists(fsPath)) && !options.create) {
-      throw vscode.FileSystemError.FileNotFound(uri);
-    }
     try {
-      await fs.writeFile(fsPath, content, { flag: options.overwrite ? "w" : "wx" });
-    } catch (error) {
+      let binary = "";
+      for (let i = 0; i < content.length; i++) {
+        binary += String.fromCharCode(content[i]);
+      }
+      const base64 = btoa(binary);
+      await vfsWriteFile(fsPath, base64, options.create, options.overwrite);
+    } catch (error: any) {
       throw this.toFileSystemError(error, uri);
     }
   }
@@ -191,46 +334,24 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
   async delete(uri: vscode.Uri, options: { recursive: boolean }): Promise<void> {
     const fsPath = this.asFsPath(uri);
     try {
-      await fs.rm(fsPath, { force: true, recursive: options.recursive });
-    } catch (error) {
+      await vfsDelete(fsPath, options.recursive);
+    } catch (error: any) {
       throw this.toFileSystemError(error, uri);
     }
   }
 
   async rename(oldUri: vscode.Uri, newUri: vscode.Uri, options: { overwrite: boolean }): Promise<void> {
-    const oldPath = this.asFsPath(oldUri);
-    const newPath = this.asFsPath(newUri);
-
     try {
-      if (options.overwrite && (await fs.exists(newPath))) {
-        await fs.rm(newPath, { force: true, recursive: true });
-      }
-      await fs.rename(oldPath, newPath);
-    } catch (error) {
+      await vfsRename(this.asFsPath(oldUri), this.asFsPath(newUri), options.overwrite);
+    } catch (error: any) {
       throw this.toFileSystemError(error, oldUri);
     }
   }
 
   async copy(source: vscode.Uri, destination: vscode.Uri, options: { overwrite: boolean }): Promise<void> {
-    const sourcePath = this.asFsPath(source);
-    const destPath = this.asFsPath(destination);
-
     try {
-      if (!(await fs.exists(sourcePath))) {
-        throw vscode.FileSystemError.FileNotFound(source);
-      }
-      if ((await fs.exists(destPath)) && !options.overwrite) {
-        throw vscode.FileSystemError.FileExists(destination);
-      }
-
-      await this.ensureParentDirectory(destPath);
-      if ((await fs.stat(sourcePath)).isDirectory()) {
-        await this.copyDirectory(source, destination, options.overwrite);
-      } else {
-        const data = await fs.readFile(sourcePath);
-        await fs.writeFile(destPath, data instanceof Uint8Array ? data : new Uint8Array(data));
-      }
-    } catch (error) {
+      await vfsCopy(this.asFsPath(source), this.asFsPath(destination), options.overwrite);
+    } catch (error: any) {
       throw this.toFileSystemError(error, source);
     }
   }
@@ -238,52 +359,10 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
   async createDirectory(uri: vscode.Uri): Promise<void> {
     const fsPath = this.asFsPath(uri);
     try {
-      await fs.mkdir(fsPath, { recursive: true });
-    } catch (error) {
+      await vfsMkdir(fsPath);
+    } catch (error: any) {
       throw this.toFileSystemError(error, uri);
     }
-  }
-
-  private async copyDirectory(source: vscode.Uri, destination: vscode.Uri, overwrite: boolean): Promise<void> {
-    const sourcePath = this.asFsPath(source);
-    const destPath = this.asFsPath(destination);
-
-    if (!(await fs.exists(destPath))) {
-      await fs.mkdir(destPath, { recursive: true });
-    }
-
-    const entries = await fs.readdir(sourcePath);
-    for (const entry of entries) {
-      const childSource = vscode.Uri.joinPath(source, entry);
-      const childDestination = vscode.Uri.joinPath(destination, entry);
-      const stat = await fs.stat(this.asFsPath(childSource));
-      if (stat.isDirectory()) {
-        await this.copyDirectory(childSource, childDestination, overwrite);
-      } else {
-        const data = await fs.readFile(this.asFsPath(childSource));
-        await fs.writeFile(this.asFsPath(childDestination), data instanceof Uint8Array ? data : new Uint8Array(data));
-      }
-    }
-  }
-
-  private async ensureParentDirectory(fsPath: string): Promise<void> {
-    const parent = path.dirname(fsPath);
-    if (parent && parent !== fsPath && !(await fs.exists(parent))) {
-      await fs.mkdir(parent, { recursive: true });
-    }
-  }
-
-  private toFileType(stats: { isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }): vscode.FileType {
-    if (stats.isFile()) {
-      return vscode.FileType.File;
-    }
-    if (stats.isDirectory()) {
-      return vscode.FileType.Directory;
-    }
-    if (stats.isSymbolicLink()) {
-      return vscode.FileType.SymbolicLink;
-    }
-    return vscode.FileType.Unknown;
   }
 
   private asFsPath(uri: vscode.Uri): string {
@@ -294,7 +373,7 @@ class MemFS implements vscode.FileSystemProvider, vscode.Disposable {
   }
 
   private toFileSystemError(error: unknown, uri: vscode.Uri): vscode.FileSystemError {
-    const err = error as NodeJS.ErrnoException;
+    const err = error as { code?: string; message?: string };
     switch (err?.code) {
       case "ENOENT":
         return vscode.FileSystemError.FileNotFound(uri);

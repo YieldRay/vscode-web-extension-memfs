@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
   <head>
     <script>
@@ -20,7 +20,10 @@
 
     <!-- Workbench Icon/Manifest/CSS -->
     <link rel="icon" href="https://raw.esm.sh/code-oss@1.119.0/favicon.ico" type="image/x-icon" />
-    <link rel="stylesheet" href="https://raw.esm.sh/code-oss@1.119.0/out/vs/workbench/workbench.web.main.internal.css" />
+    <link
+      rel="stylesheet"
+      href="https://raw.esm.sh/code-oss@1.119.0/out/vs/workbench/workbench.web.main.internal.css"
+    />
   </head>
 
   <body aria-label=""></body>
@@ -35,13 +38,13 @@
     // blocked because they don't match window.location.origin.
     const cdnOrigin = new URL(baseUrl).origin;
     if (window.trustedTypes) {
-      globalThis._VSCODE_WEB_PACKAGE_TTP = window.trustedTypes.createPolicy('amdLoader', {
+      globalThis._VSCODE_WEB_PACKAGE_TTP = window.trustedTypes.createPolicy("amdLoader", {
         createScriptURL(value) {
           if (value.startsWith(window.location.origin) || value.startsWith(cdnOrigin)) {
             return value;
           }
           throw new Error(`[trusted_script_src] Invalid script url: ${value}`);
-        }
+        },
       });
     }
   </script>
@@ -54,7 +57,30 @@
   <script type="module" src="https://raw.esm.sh/code-oss@1.119.0/out/nls.messages.js"></script>
   <script type="module">
     import init from "https://raw.esm.sh/code-oss@1.119.0/workbench.js";
+    import * as almostnode from "https://esm.sh/almostnode@0.2";
+
+    globalThis.almostnode = almostnode;
+
     init(document.body, {
+      commands: [
+        {
+          id: "host.eval",
+          handler: async (code) => {
+            return await eval(code);
+          },
+        },
+        {
+          id: "host.promise",
+          handler: async (code) => {
+            try {
+              const value = await eval(code);
+              return { status: "fulfilled", value };
+            } catch (reason) {
+              return { status: "rejected", reason };
+            }
+          },
+        },
+      ],
       productConfiguration: {
         extensionsGallery: {
           serviceUrl: "https://open-vsx.org/vscode/gallery",
