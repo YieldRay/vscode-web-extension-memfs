@@ -10,7 +10,7 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Code" />
-    <link rel="apple-touch-icon" href="https://raw.esm.sh/code-oss@1.108.2/code-192.png" />
+    <link rel="apple-touch-icon" href="https://raw.esm.sh/code-oss@1.119.0/code-192.png" />
 
     <!-- Disable pinch zooming -->
     <meta
@@ -19,26 +19,38 @@
     />
 
     <!-- Workbench Icon/Manifest/CSS -->
-    <link rel="icon" href="https://raw.esm.sh/code-oss@1.108.2/favicon.ico" type="image/x-icon" />
-    <link rel="stylesheet" href="https://raw.esm.sh/code-oss@1.108.2/out/vs/workbench/workbench.web.main.internal.css" />
+    <link rel="icon" href="https://raw.esm.sh/code-oss@1.119.0/favicon.ico" type="image/x-icon" />
+    <link rel="stylesheet" href="https://raw.esm.sh/code-oss@1.119.0/out/vs/workbench/workbench.web.main.internal.css" />
   </head>
 
   <body aria-label=""></body>
 
   <!-- Startup (do not modify order of script tags!) -->
   <script>
-    const baseUrl = new URL("https://raw.esm.sh/code-oss@1.108.2/out/", window.location.href);
+    const baseUrl = new URL("https://raw.esm.sh/code-oss@1.119.0/out/", window.location.href);
     globalThis._VSCODE_FILE_ROOT = baseUrl.origin + baseUrl.pathname;
+
+    if (window.trustedTypes) {
+      const baseUrlOrigin = new URL(baseUrl).origin;
+      globalThis._VSCODE_WEB_PACKAGE_TTP = window.trustedTypes.createPolicy('amdLoader', {
+        createScriptURL(value) {
+          if (value.startsWith(window.location.origin) || value.startsWith(baseUrlOrigin)) {
+            return value;
+          }
+          throw new Error(`[trusted_script_src] Invalid script url: ${value}`);
+        }
+      });
+    }
   </script>
   <script>
     performance.mark("code/willLoadWorkbenchMain");
   </script>
   <!-- always ensure built in english NLS messages -->
-  <script type="module" src="https://raw.esm.sh/code-oss@1.108.2/out/nls.messages.js"></script>
+  <script type="module" src="https://raw.esm.sh/code-oss@1.119.0/out/nls.messages.js"></script>
   <!-- attempt to load NLS messages in case non-english -->
-  <script type="module" src="https://raw.esm.sh/code-oss@1.108.2/out/nls.messages.js"></script>
+  <script type="module" src="https://raw.esm.sh/code-oss@1.119.0/out/nls.messages.js"></script>
   <script type="module">
-    import init from "https://raw.esm.sh/code-oss@1.108.2/workbench.js";
+    import init from "https://raw.esm.sh/code-oss@1.119.0/workbench.js";
     init(document.body, {
       productConfiguration: {
         extensionsGallery: {
@@ -47,8 +59,7 @@
           resourceUrlTemplate: "https://openvsxorg.blob.core.windows.net/resources/{publisher}/{name}/{version}/{path}",
         },
         extensionEnabledApiProposals: {},
-        /** IMPORTANT CONFIG TO MAKE webWorkerExtensionHostIframe.html work */
-        webEndpointUrlTemplate: "https://unpkg.com/code-oss@1.108.2",
+        webEndpointUrlTemplate: "https://raw.esm.sh/code-oss@1.119.0",
         quality: "stable",
       },
       folderUri: {
@@ -61,7 +72,7 @@
         {
           scheme: location.protocol.replace(":", ""),
           authority: location.host,
-          path: location.pathname + "extension/dist",
+          path: new URL("extension/dist", location.href).pathname,
         },
       ],
     });

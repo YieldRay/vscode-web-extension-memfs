@@ -10,7 +10,7 @@
     "dist"
   ],
   "engines": {
-    "vscode": "^1.108.1"
+    "vscode": "^1.118.0"
   },
   "categories": [
     "Other"
@@ -45,19 +45,19 @@
     "package-web": "webpack --mode production --devtool hidden-source-map"
   },
   "dependencies": {
-    "@zenfs/core": "^2.4.4",
-    "@zenfs/dom": "^1.2.7",
+    "@zenfs/core": "^2.5.6",
+    "@zenfs/dom": "^1.2.9",
     "assert": "^2.1.0",
     "buffer": "^6.0.3",
     "path-browserify": "^1.0.1",
     "process": "^0.11.10"
   },
   "devDependencies": {
-    "@types/node": "^22.19.7",
-    "@types/vscode": "^1.108.1",
-    "esbuild-loader": "^4.4.2",
+    "@types/node": "^22.19.19",
+    "@types/vscode": "^1.118.0",
+    "esbuild-loader": "^4.4.3",
     "esbuild-register": "^3.6.0",
-    "webpack": "^5.104.1",
+    "webpack": "^5.106.2",
     "webpack-cli": "^6.0.1"
   }
 }
