@@ -61,6 +61,9 @@
 
     globalThis.almostnode = almostnode;
 
+    // Queue for server-ready events; drained by the extension after each command.
+    globalThis._pendingServers = [];
+
     init(document.body, {
       commands: [
         {

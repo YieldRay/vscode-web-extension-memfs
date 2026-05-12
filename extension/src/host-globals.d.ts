@@ -6,14 +6,25 @@
  * TypeScript needs these declarations to avoid "no index signature" errors.
  */
 
-import type { VirtualFS, RunResult } from "almostnode";
+import type { VirtualFS, RunResult, ServerBridge } from "almostnode";
 
 interface AlmostNodeContainer {
   vfs: VirtualFS;
-  run(command: string, options?: { cwd?: string }): Promise<RunResult>;
+  run(command: string, options?: { cwd?: string; signal?: AbortSignal }): Promise<RunResult>;
   execute(code: string, filename?: string): { exports: unknown };
   runFile(filename: string): { exports: unknown };
   sendInput(data: string): void;
+  serverBridge: ServerBridge;
+}
+
+interface PendingServer {
+  port: number;
+  url: string;
+}
+
+interface VfsChange {
+  path: string;
+  type: "created" | "changed" | "deleted";
 }
 
 declare global {
@@ -21,4 +32,10 @@ declare global {
   var container: AlmostNodeContainer;
   // eslint-disable-next-line no-var
   var almostnode: typeof import("almostnode");
+  // eslint-disable-next-line no-var
+  var _pendingServers: PendingServer[];
+  // eslint-disable-next-line no-var
+  var _vfsChanges: VfsChange[];
+  // eslint-disable-next-line no-var
+  var _runAbort: AbortController | null;
 }

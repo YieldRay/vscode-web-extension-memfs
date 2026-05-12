@@ -12,10 +12,19 @@ const MAX_HISTORY = 100;
 const PROMPT = "$ ";
 
 /** Callback invoked after each command to notify the file explorer of changes. */
-export type OnCommandDone = () => void;
+export type OnCommandDone = () => void | Promise<void>;
 
 const runCommand = createHostFunction((cmd: string) => {
-  return globalThis.container.run(cmd);
+  globalThis._runAbort = new AbortController();
+  return globalThis.container.run(cmd, { signal: globalThis._runAbort.signal });
+});
+
+const abortRunning = createHostFunction(() => {
+  if (globalThis._runAbort) {
+    globalThis._runAbort.abort();
+    globalThis._runAbort = null;
+  }
+  return "ok";
 });
 
 /**
@@ -59,7 +68,14 @@ export class AlmostNodeTerminal implements vscode.Pseudoterminal {
   }
 
   handleInput(data: string): void {
-    if (this._running) return;
+    // Allow Ctrl+C while a command is running to abort it
+    if (this._running) {
+      if (data.includes("\x03")) {
+        this._writeEmitter.fire("^C\r\n");
+        abortRunning();
+      }
+      return;
+    }
 
     let i = 0;
     while (i < data.length) {
@@ -433,9 +449,9 @@ export class AlmostNodeTerminal implements vscode.Pseudoterminal {
       this._writeEmitter.fire(`Error: ${msg}\r\n`);
     }
 
-    // Notify file explorer of potential changes
+    // Notify file explorer of potential changes and check for new servers
     if (this._onCommandDone) {
-      this._onCommandDone();
+      await this._onCommandDone();
     }
 
     this._running = false;
