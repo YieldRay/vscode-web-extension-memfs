@@ -2,6 +2,7 @@ import * as path from "path";
 import * as fs from "fs";
 import * as webpack from "webpack";
 import { EsbuildPlugin } from "esbuild-loader";
+import { isBuiltin } from "module";
 
 class CopyFilesPlugin implements webpack.WebpackPluginInstance {
   constructor(private files: string[]) {}
@@ -33,14 +34,6 @@ const webExtensionConfig: webpack.Configuration = {
     mainFields: ["browser", "module", "main"], // look for `browser` entry point in imported node modules
     extensions: [".ts", ".js"], // support ts-files and js-files
     alias: {},
-    fallback: {
-      // Webpack 5 no longer polyfills Node.js core modules automatically.
-      // see https://webpack.js.org/configuration/resolve/#resolvefallback
-      // for the list of Node.js core module polyfills.
-      path: require.resolve("path-browserify"),
-      buffer: require.resolve("buffer"),
-      process: require.resolve("process/browser"),
-    },
   },
   module: {
     rules: [
@@ -68,9 +61,14 @@ const webExtensionConfig: webpack.Configuration = {
       process: "process/browser", // provide a shim for the global `process` variable
       Buffer: ["buffer", "Buffer"], // provide a shim for the global `Buffer` variable
     }),
-    // Stub node:* imports that just-bash's browser bundle references.
-    new webpack.NormalModuleReplacementPlugin(/^node:/, (resource) => {
-      resource.request = path.resolve(__dirname, "src", "empty-module.ts");
+    // polyfills Node.js core modules
+    new webpack.NormalModuleReplacementPlugin(/.+/, (resource) => {
+      if (isBuiltin(resource.request)) {
+        const moduleName = resource.request.startsWith("node:")
+          ? resource.request.slice("node:".length)
+          : resource.request;
+        resource.request = `unenv/node/${moduleName}`;
+      }
     }),
     new CopyFilesPlugin(["package.json", "package.nls.json"]),
     new EsbuildPlugin({
