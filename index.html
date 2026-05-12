@@ -75,7 +75,7 @@
         {
           scheme: location.protocol.replace(":", ""),
           authority: location.host,
-          path: location.pathname + "extension/dist",
+          path: new URL("extension/dist", location.href).pathname,
         },
       ],
     });

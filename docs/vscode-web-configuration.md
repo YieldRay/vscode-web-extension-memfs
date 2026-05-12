@@ -42,6 +42,7 @@ A minimal self-hosted VS Code web setup requires:
 | [Extension Host Iframe](./extension-host-iframe.md) | `webEndpointUrlTemplate`, iframe sandbox, security model |
 | [Builtin Extensions & folderUri](./builtin-extensions.md) | `additionalBuiltinExtensions`, `folderUri`, workspace config |
 | [CORS & CSP](./cors-and-csp.md) | `serve.json`, Content-Security-Policy headers, cross-origin setup |
+| [Network Filesystem Performance](./network-filesystem-performance.md) | Caching strategies for network-backed `FileSystemProvider` |
 
 ## Architecture Overview
 

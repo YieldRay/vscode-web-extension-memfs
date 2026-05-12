@@ -149,12 +149,17 @@ folderUri: {
 
 ### Common Schemes
 
-| Scheme | Use Case |
-|--------|----------|
-| `memfs` | Custom in-memory filesystem (this project) |
-| `vscode-vfs` | VS Code's virtual filesystem (GitHub repos, etc.) |
-| `file` | Local files (only works with a remote server backend) |
-| Custom | Any scheme your `FileSystemProvider` extension registers |
+| Scheme | Use Case | Requires |
+|--------|----------|----------|
+| `memfs` | Custom in-memory filesystem (this project) | Your extension registering a `FileSystemProvider` for `memfs` |
+| `vscode-vfs` | GitHub/Azure repos (used by `vscode.dev`) | `github.remotehub` extension installed and active |
+| `file` | Local files | A remote server backend (`remoteAuthority`) |
+| Custom | Any scheme you define | Your extension calling `registerFileSystemProvider` for that scheme |
+
+**Important**: A `folderUri` with a given scheme only works if a `FileSystemProvider` is registered for that scheme. Otherwise VS Code throws `ENOPRO: No file system provider found for resource`. The provider must either be:
+- A builtin extension loaded via `additionalBuiltinExtensions`
+- A marketplace extension that activates on `onFileSystem:<scheme>`
+- Registered programmatically before VS Code tries to open the folder
 
 ### `authority` Field
 

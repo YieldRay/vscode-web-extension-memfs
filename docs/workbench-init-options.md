@@ -90,23 +90,18 @@ folderUri: {
 ### Examples
 
 ```javascript
-// In-memory filesystem (custom scheme)
+// In-memory filesystem (custom scheme registered by your extension)
 folderUri: {
   scheme: "memfs",
   authority: location.host,
   path: "/",
   query: "",
 }
-
-// GitHub repository via vscode-vfs
-folderUri: {
-  scheme: "vscode-vfs",
-  authority: "github",
-  path: "/user/repo",
-}
 ```
 
 The `folderUri` triggers the `onFileSystem:<scheme>` activation event, which loads any extension registered to handle that scheme.
+
+**Important**: The scheme must have a corresponding `FileSystemProvider` registered by an extension. If no provider exists for the scheme, VS Code throws `ENOPRO: No file system provider found for resource`. Make sure the extension that registers the provider is included in `additionalBuiltinExtensions` or installed from the marketplace.
 
 ---
 
