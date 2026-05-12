@@ -1,6 +1,5 @@
 import * as vscode from "vscode";
 import { Bash } from "just-bash";
-import type { IFileSystem } from "just-bash";
 import type { ZenFsAdapter, FsChangeEvent } from "./zenfs-adapter";
 
 const MAX_HISTORY = 100;

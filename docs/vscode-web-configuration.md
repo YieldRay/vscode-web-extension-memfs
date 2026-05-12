@@ -37,7 +37,8 @@ A minimal self-hosted VS Code web setup requires:
 
 | Document | Covers |
 |----------|--------|
-| [Workbench init() Options](./workbench-init-options.md) | Full `init()` / `create()` API reference |
+| [Workbench init() Options](./workbench-init-options.md) | Full `init()` / `create()` API reference — all `IWorkbenchConstructionOptions` fields |
+| [Extension ↔ Main Page Bridge](./extension-main-page-bridge.md) | `commands`, `messagePorts` — calling main-page APIs from extensions |
 | [Trusted Types](./trusted-types.md) | `_VSCODE_WEB_PACKAGE_TTP` policy setup |
 | [Extension Host Iframe](./extension-host-iframe.md) | `webEndpointUrlTemplate`, iframe sandbox, security model |
 | [Builtin Extensions & folderUri](./builtin-extensions.md) | `additionalBuiltinExtensions`, `folderUri`, workspace config |
@@ -47,25 +48,37 @@ A minimal self-hosted VS Code web setup requires:
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Browser Tab (your origin: localhost:3000)               │
-│                                                         │
-│  index.html                                             │
-│    ├── Sets _VSCODE_FILE_ROOT (CDN base path)           │
-│    ├── Sets _VSCODE_WEB_PACKAGE_TTP (Trusted Types)     │
-│    ├── Loads workbench CSS from CDN                      │
-│    └── Calls init(body, options)                         │
-│         ├── productConfiguration (gallery, quality)     │
-│         ├── folderUri (initial workspace)               │
-│         └── additionalBuiltinExtensions (your exts)    │
-│                                                         │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  Extension Host Iframe (sandboxed, cross-origin)  │  │
-│  │  Origin: webEndpointUrlTemplate resolved URL      │  │
-│  │  sandbox="allow-scripts allow-same-origin"        │  │
-│  │  Runs web worker extensions in isolation          │  │
-│  └───────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  Browser Tab                                             │
+│                                                          │
+│  Main Window (your origin: localhost:3000)                │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  index.html                                        │  │
+│  │    ├── Sets _VSCODE_FILE_ROOT (CDN base path)      │  │
+│  │    ├── Sets _VSCODE_WEB_PACKAGE_TTP (Trusted Types)│  │
+│  │    ├── Loads workbench CSS from CDN                 │  │
+│  │    └── Calls init(body, options)                    │  │
+│  │         ├── productConfiguration                   │  │
+│  │         ├── folderUri                              │  │
+│  │         ├── additionalBuiltinExtensions            │  │
+│  │         ├── commands ← HOST-SIDE HANDLERS          │  │
+│  │         └── messagePorts ← DIRECT CHANNELS         │  │
+│  └────────────────────────────────────────────────────┘  │
+│       │ MessagePort (VS Code IPC)                        │
+│       ▼                                                  │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  Extension Host Iframe (CROSS-ORIGIN)              │  │
+│  │  Origin: raw.esm.sh (from webEndpointUrlTemplate)  │  │
+│  │  sandbox="allow-scripts allow-same-origin"         │  │
+│  │       │                                            │  │
+│  │       ▼                                            │  │
+│  │  Web Worker (DedicatedWorkerGlobalScope)            │  │
+│  │    ├── Your extension.ts runs here                 │  │
+│  │    ├── Has: fetch, IndexedDB, WebSocket, crypto    │  │
+│  │    ├── NO: window, DOM, navigator.serviceWorker    │  │
+│  │    └── Calls host via: executeCommand / MessagePort│  │
+│  └────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
          │                    │
          ▼                    ▼
 ┌─────────────────┐  ┌─────────────────────────┐

@@ -81,13 +81,20 @@ For self-hosting with a CDN like `raw.esm.sh`, you typically use a plain URL wit
 webEndpointUrlTemplate: "https://raw.esm.sh/code-oss@1.119.0"
 ```
 
-Since `commit` is not set in this case, VS Code skips the template replacement path and loads the extension host iframe in a **same-origin** configuration with a console warning:
+**Important:** Even without `{{uuid}}`/`{{commit}}`/`{{quality}}` placeholders, this still creates a **cross-origin** iframe. The iframe loads from `raw.esm.sh`, which is a different origin from your hosting page (e.g., `localhost:3000`).
+
+VS Code only falls back to **same-origin** when `webEndpointUrlTemplate` is completely absent (or when both `commit` and `quality` are unset alongside a template that uses those placeholders). In that case it logs:
 
 ```
 The web worker extension host is started in a same-origin iframe!
 ```
 
-This is acceptable for development but reduces security isolation in production.
+With a plain CDN URL, the iframe runs on the CDN's origin. This means:
+- `BroadcastChannel` between extension worker and main page **does not work** (different origins)
+- `localStorage` / `sessionStorage` are isolated per origin
+- To call main-page APIs from the extension, use the [`commands` bridge](./extension-main-page-bridge.md)
+
+The downside of a plain CDN URL (vs. a template with `{{uuid}}`) is that all workspaces share the same iframe origin — extensions in different workspaces can access each other's IndexedDB and storage on that origin.
 
 ### Full Template Usage (Production)
 
@@ -152,6 +159,15 @@ The parent workbench and extension host iframe communicate via:
 1. **Initial handshake**: The parent creates a `MessageChannel` and transfers one port to the iframe via `postMessage`
 2. **Extension host protocol**: All subsequent communication uses VS Code's binary protocol over the `MessagePort`
 3. **No DOM access**: Extensions cannot touch the main workbench DOM — all VS Code API calls are proxied through the message channel
+
+### Calling Main-Page APIs from Extensions
+
+Because extensions run in a cross-origin worker, they cannot directly access `window`, `navigator.serviceWorker`, `localStorage`, or any other main-page API. VS Code provides two bridge mechanisms:
+
+- **`commands`** (in `init()` options) — register handlers on the main page, call them from extensions via `executeCommand`. Stable and recommended.
+- **`messagePorts`** (in `init()` options) — deliver a `MessagePort` directly to an extension for high-throughput bidirectional communication. Proposed API.
+
+See [Extension ↔ Main Page Bridge](./extension-main-page-bridge.md) for full documentation and examples.
 
 ## CORS Requirements
 
