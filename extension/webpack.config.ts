@@ -32,12 +32,18 @@ const webExtensionConfig: webpack.Configuration = {
   resolve: {
     mainFields: ["browser", "module", "main"], // look for `browser` entry point in imported node modules
     extensions: [".ts", ".js"], // support ts-files and js-files
-    alias: {},
+    alias: {
+      // Force ESM build of isomorphic-git which uses sha.js instead of Node crypto
+      "isomorphic-git$": path.resolve(__dirname, "node_modules/isomorphic-git/index.js"),
+    },
     fallback: {
       // Webpack 5 no longer polyfills Node.js core modules automatically.
       path: require.resolve("path-browserify"),
       buffer: require.resolve("buffer"),
       process: require.resolve("process/browser"),
+      crypto: false, // isomorphic-git falls back to globalThis.crypto.subtle
+      stream: false,
+      fs: false,
     },
   },
   module: {
@@ -48,8 +54,18 @@ const webExtensionConfig: webpack.Configuration = {
         use: [
           {
             loader: "esbuild-loader",
+            options: {
+              target: "es2024", // Keep async/await native — createHostFunction uses fn.toString()
+            },
           },
         ],
+      },
+      {
+        // ESM modules in node_modules use bare specifiers without extensions.
+        test: /\.m?js$/,
+        resolve: {
+          fullySpecified: false,
+        },
       },
     ],
   },
@@ -60,9 +76,9 @@ const webExtensionConfig: webpack.Configuration = {
     }),
     new CopyFilesPlugin(["package.json", "package.nls.json"]),
     new EsbuildPlugin({
-      minify: true,
+      minify: false,
       minifyWhitespace: true,
-      minifyIdentifiers: true,
+      minifyIdentifiers: false, // Must be false — createHostFunction uses fn.toString()
       minifySyntax: true,
       legalComments: "none",
     }),

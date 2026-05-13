@@ -79,7 +79,14 @@
               const value = await eval(code);
               return { status: "fulfilled", value };
             } catch (reason) {
-              return { status: "rejected", reason };
+              // Error objects don't survive structured cloning (message, stack are non-enumerable).
+              // Serialize to a plain object so the extension can read the error details.
+              const serialized = reason instanceof Error
+                ? { message: reason.message, code: reason.code, name: reason.name, stack: reason.stack }
+                : typeof reason === "string"
+                  ? { message: reason }
+                  : reason;
+              return { status: "rejected", reason: serialized };
             }
           },
         },

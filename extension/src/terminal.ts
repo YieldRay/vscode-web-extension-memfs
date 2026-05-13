@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
+import minimist from "minimist";
 import { createHostFunction } from "./host-bridge";
+import { runGitCommand, type GitCommand } from "./git";
 
 /** Result from almostnode's container.run() */
 interface RunResult {
@@ -14,10 +16,40 @@ const PROMPT = "$ ";
 /** Callback invoked after each command to notify the file explorer of changes. */
 export type OnCommandDone = () => void | Promise<void>;
 
+/**
+ * Tokenize a command line string into an array of arguments,
+ * respecting single and double quotes.
+ */
+function shellSplit(input: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let inSingle = false;
+  let inDouble = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+    } else if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+    } else if (ch === " " && !inSingle && !inDouble) {
+      if (current.length > 0) {
+        args.push(current);
+        current = "";
+      }
+    } else {
+      current += ch;
+    }
+  }
+  if (current.length > 0) args.push(current);
+  return args;
+}
+
 const runCommand = createHostFunction((cmd: string) => {
   globalThis._runAbort = new AbortController();
   return globalThis.container.run(cmd, { signal: globalThis._runAbort.signal });
 });
+
 
 const abortRunning = createHostFunction(() => {
   if (globalThis._runAbort) {
@@ -430,7 +462,21 @@ export class AlmostNodeTerminal implements vscode.Pseudoterminal {
 
     this._running = true;
     try {
-      const result: RunResult = await runCommand(trimmed);
+      let result: RunResult;
+
+      if (trimmed === "git" || trimmed.startsWith("git ")) {
+        // Route git commands to isomorphic-git
+        const tokens = shellSplit(trimmed).slice(1); // drop "git" prefix
+        const parsed = minimist(tokens, { string: ["m", "message", "b"], boolean: ["oneline", "A", "all", "v", "verbose", "d", "D", "h", "help", "l", "list"] });
+        const gitCmd: GitCommand = {
+          subcmd: parsed._[0] || "",
+          args: parsed._.slice(1),
+          flags: { ...parsed, _: undefined },
+        };
+        result = await runGitCommand(gitCmd);
+      } else {
+        result = await runCommand(trimmed);
+      }
 
       if (result.stdout) {
         this._writeEmitter.fire(result.stdout.replace(/\n/g, "\r\n"));
@@ -445,7 +491,16 @@ export class AlmostNodeTerminal implements vscode.Pseudoterminal {
         }
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      let msg: string;
+      if (err instanceof Error) {
+        msg = err.message;
+      } else if (typeof err === "object" && err !== null && "message" in err) {
+        msg = String((err as any).message);
+      } else if (typeof err === "string") {
+        msg = err;
+      } else {
+        try { msg = JSON.stringify(err); } catch { msg = String(err); }
+      }
       this._writeEmitter.fire(`Error: ${msg}\r\n`);
     }
 

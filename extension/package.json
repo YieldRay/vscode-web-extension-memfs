@@ -59,10 +59,13 @@
   },
   "dependencies": {
     "buffer": "^6.0.3",
+    "isomorphic-git": "^1.37.6",
+    "minimist": "^1.2.8",
     "path-browserify": "^1.0.1",
     "process": "^0.11.10"
   },
   "devDependencies": {
+    "@types/minimist": "^1.2.5",
     "@types/vscode": "^1.118.0",
     "esbuild-loader": "^4.4.3",
     "esbuild-register": "^3.6.0",

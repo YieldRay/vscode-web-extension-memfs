@@ -400,14 +400,16 @@ export async function activate(context: vscode.ExtensionContext) {
           events.push({ type: vscode.FileChangeType.Changed, uri });
         }
 
-        // Notify parent directory so the explorer refreshes its listing
-        const parent = path.substring(0, path.lastIndexOf("/")) || "/";
-        if (!notifiedParents.has(parent)) {
-          notifiedParents.add(parent);
+        // Notify all ancestor directories so the explorer refreshes their listings
+        let ancestor = path.substring(0, path.lastIndexOf("/")) || "/";
+        while (!notifiedParents.has(ancestor)) {
+          notifiedParents.add(ancestor);
           events.push({
             type: vscode.FileChangeType.Changed,
-            uri: vscode.Uri.from({ scheme: "memfs", authority: workspaceAuthority, path: parent }),
+            uri: vscode.Uri.from({ scheme: "memfs", authority: workspaceAuthority, path: ancestor }),
           });
+          if (ancestor === "/") break;
+          ancestor = ancestor.substring(0, ancestor.lastIndexOf("/")) || "/";
         }
       }
 
